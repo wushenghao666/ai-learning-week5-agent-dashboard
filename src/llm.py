@@ -16,7 +16,12 @@ class LLMError(RuntimeError):
 SYSTEM_PROMPT = '''You plan a Chinese learning goal. Return JSON only: an object with a tasks array.
 Each task must contain id, title, action, tool, argument, depends_on.
 Use ids t1, t2, ...; tool must be one of summarize, checklist, time_budget, review_prompt.
-Keep 2 to 5 tasks. depends_on contains earlier task ids. Do not invent tools.'''
+Keep 2 to 5 tasks. depends_on contains earlier task ids. Do not invent tools.
+Support learning, portfolio project planning, interview preparation and note organization.
+summarize and review_prompt argument must be a nonempty string.
+checklist argument must be a nonempty array of strings specific to the goal.
+time_budget argument must be an object with integer hours from 1 to 168 and goal text.
+These tools create planning material; do not claim to build websites or complete real-world work.'''
 
 def _output_text(payload: dict) -> str:
     if isinstance(payload.get('output_text'), str):
@@ -40,6 +45,7 @@ def plan_with_llm(goal: str, timeout: int = 30) -> list[PlannedTask]:
         'instructions': SYSTEM_PROMPT,
         'input': goal,
         'store': False,
+        'max_output_tokens': 3000,
     }
     request = urllib.request.Request(
         'https://api.openai.com/v1/responses',
@@ -64,8 +70,23 @@ def plan_with_llm(goal: str, timeout: int = 30) -> list[PlannedTask]:
         if any(task.tool not in valid_tools for task in tasks):
             raise ValueError('模型返回了未注册工具')
         ids = {task.id for task in tasks}
+        if len(ids) != len(tasks):
+            raise ValueError('任务编号重复')
         if any(dep not in ids for task in tasks for dep in task.depends_on):
             raise ValueError('任务依赖不存在')
+        earlier = set()
+        for task in tasks:
+            if not all(isinstance(text, str) and text.strip() for text in (task.id, task.title, task.action)):
+                raise ValueError('任务文字不能为空')
+            if not isinstance(task.depends_on, list) or not set(task.depends_on) <= earlier:
+                raise ValueError('任务只能依赖较早的任务')
+            if task.tool in ('summarize', 'review_prompt') and not (isinstance(task.argument, str) and task.argument.strip()):
+                raise ValueError('文本工具参数必须为字符串')
+            if task.tool == 'checklist' and not (isinstance(task.argument, list) and task.argument and all(isinstance(x, str) and x.strip() for x in task.argument)):
+                raise ValueError('清单工具参数必须为文字数组')
+            if task.tool == 'time_budget' and not (isinstance(task.argument, dict) and type(task.argument.get('hours')) is int and 1 <= task.argument['hours'] <= 168):
+                raise ValueError('时间预算参数无效')
+            earlier.add(task.id)
         return tasks
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         raise LLMError(f'模型返回格式无效：{exc}') from exc

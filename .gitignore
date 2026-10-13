@@ -5,3 +5,5 @@ __pycache__/
 .env.*
 outputs/*.json
 outputs/sessions/
+tests/tmp*/
+tests/test-data-*/

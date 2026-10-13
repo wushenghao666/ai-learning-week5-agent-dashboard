@@ -1,10 +1,12 @@
 const $ = (s) => document.querySelector(s);
 const API_BASE = window.AGENT_API_BASE || '';
 const state = { session: null };
+let token = localStorage.getItem('week5-session-token');
+if (!token) { token = crypto.randomUUID(); localStorage.setItem('week5-session-token', token); }
 const statusText = { pending: '待执行', running: '执行中', done: '已完成', failed: '失败' };
 async function request(path, options = {}) {
   if (!API_BASE && location.hostname.endsWith('github.io')) return window.demoRequest(path, options);
-  const response = await fetch(`${API_BASE}${path}`, { headers: {'Content-Type':'application/json'}, ...options });
+  const response = await fetch(`${API_BASE}${path}`, { headers: {'Content-Type':'application/json', 'X-Session-Token': token}, ...options });
   const data = await response.json(); if (!response.ok) throw new Error(data.error || '请求失败'); return data;
 }
 function showNotice(text, error = false) { const node = $('#notice'); node.textContent = text; node.style.color = error ? '#dc2626' : '#64748b'; }

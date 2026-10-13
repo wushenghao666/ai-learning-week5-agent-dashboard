@@ -3,6 +3,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
+import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
@@ -14,6 +17,8 @@ ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / 'web'
 SESSION_PATH = ROOT / 'outputs' / 'session.json'
 ALLOWED_ORIGIN = os.getenv('AGENT_ALLOWED_ORIGIN', '*')
+STATE_LOCK = threading.RLock()
+MODEL_CALLS = []
 
 
 def session_payload(session: Session) -> dict:
@@ -23,9 +28,19 @@ def session_payload(session: Session) -> dict:
     return data
 
 class DashboardHandler(BaseHTTPRequestHandler):
+    def _session_path(self) -> Path:
+        token = self.headers.get('X-Session-Token', '')
+        if not token:
+            if os.getenv('RENDER'):
+                raise ValueError('需要会话编号')
+            return SESSION_PATH
+        if not re.fullmatch(r'[a-f0-9-]{36}', token):
+            raise ValueError('会话编号无效')
+        return SESSION_PATH.parent / 'sessions' / f'{token}.json'
+
     def _cors(self) -> None:
         self.send_header('Access-Control-Allow-Origin', ALLOWED_ORIGIN)
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, X-Session-Token')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
 
     def _json(self, payload: dict, status: int = 200) -> None:
@@ -39,7 +54,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def _body(self) -> dict:
         length = int(self.headers.get('Content-Length', '0'))
-        return json.loads(self.rfile.read(length) or b'{}')
+        if length < 0 or length > 16384:
+            raise ValueError('请求内容过长')
+        result = json.loads(self.rfile.read(length) or b'{}')
+        if not isinstance(result, dict):
+            raise ValueError('请求必须为对象')
+        return result
 
     def do_OPTIONS(self) -> None:
         self.send_response(204); self._cors(); self.end_headers()
@@ -49,10 +69,17 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if path == '/api/health':
             return self._json({'ok': True, 'model_configured': bool(os.getenv('OPENAI_API_KEY'))})
         if path == '/api/session':
-            if SESSION_PATH.exists():
-                return self._json(session_payload(Session.load(SESSION_PATH)))
+            try:
+                session_path = self._session_path()
+            except ValueError as exc:
+                return self._json({'error': str(exc)}, 400)
+            with STATE_LOCK:
+                if session_path.exists():
+                    return self._json(session_payload(Session.load(session_path)))
             return self._json({'session': None})
-        target = WEB / ('index.html' if path == '/' else path.lstrip('/'))
+        target = (WEB / ('index.html' if path == '/' else path.lstrip('/'))).resolve()
+        if not target.is_relative_to(WEB.resolve()):
+            return self._json({'error': '页面不存在'}, 404)
         if target.exists() and target.is_file():
             body = target.read_bytes()
             content_type = 'text/html; charset=utf-8' if target.suffix == '.html' else 'text/css; charset=utf-8' if target.suffix == '.css' else 'application/javascript; charset=utf-8'
@@ -60,27 +87,41 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self._json({'error': '页面不存在'}, 404)
 
     def do_POST(self) -> None:
+        origin = self.headers.get('Origin')
+        if ALLOWED_ORIGIN != '*' and origin and origin != ALLOWED_ORIGIN:
+            return self._json({'error': '来源域名未被允许'}, 403)
+        with STATE_LOCK:
+            self._post_locked()
+
+    def _post_locked(self) -> None:
         path = urlparse(self.path).path
         try:
+            session_path = self._session_path()
             if path == '/api/init':
                 body = self._body(); goal = str(body.get('goal', '')).strip(); use_llm = bool(body.get('use_llm', False))
-                if not goal: return self._json({'error': '学习目标不能为空'}, 400)
+                if not 1 <= len(goal) <= 2000: return self._json({'error': '目标长度需要在 1 到 2000 字之间'}, 400)
                 if use_llm and not os.getenv('OPENAI_API_KEY'):
                     session = Session.create(goal, [task.to_dict() for task in simulation_plan(goal)])
                     session.model_mode = 'simulation'
                     session.model_notice = '未配置 OPENAI_API_KEY，当前使用本地模拟模型。结果用于演示流程，不会产生真实模型调用费用。'
-                    session.save(SESSION_PATH)
+                    session.save(session_path)
                     return self._json(session_payload(session))
-                session = init_session(goal, str(SESSION_PATH), use_llm, allow_fallback=False)
+                if use_llm:
+                    now = time.time()
+                    MODEL_CALLS[:] = [stamp for stamp in MODEL_CALLS if now - stamp < 86400]
+                    if len(MODEL_CALLS) >= int(os.getenv('AGENT_DAILY_MODEL_LIMIT', '20')):
+                        return self._json({'error': '今日模型调用额度已用完，请使用规则规划'}, 429)
+                    MODEL_CALLS.append(now)
+                session = init_session(goal, str(session_path), use_llm, allow_fallback=False)
                 session.model_mode = 'openai' if use_llm else 'rules'
-                session.save(SESSION_PATH)
+                session.save(session_path)
                 return self._json(session_payload(session))
             if path == '/api/run':
-                if not SESSION_PATH.exists(): return self._json({'error': '请先创建学习计划'}, 400)
-                session = Session.load(SESSION_PATH); outputs = run_session(session); session.save(SESSION_PATH)
+                if not session_path.exists(): return self._json({'error': '请先创建学习计划'}, 400)
+                session = Session.load(session_path); outputs = run_session(session); session.save(session_path)
                 result = session_payload(session); result['outputs'] = outputs; return self._json(result)
             if path == '/api/reset':
-                SESSION_PATH.unlink(missing_ok=True); return self._json({'session': None})
+                session_path.unlink(missing_ok=True); return self._json({'session': None})
             self._json({'error': '接口不存在'}, 404)
         except LLMError as exc:
             self._json({'error': str(exc)}, 503)
