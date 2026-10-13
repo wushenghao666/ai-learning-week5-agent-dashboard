@@ -1,0 +1,27 @@
+name: Deploy web to GitHub Pages
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set backend URL
+        env:
+          AGENT_API_BASE: ${{ vars.AGENT_API_BASE }}
+        run: python -c 'import json,os,pathlib; pathlib.Path("web/config.js").write_text("window.AGENT_API_BASE = " + json.dumps(os.environ.get("AGENT_API_BASE", "")) + ";\n")'
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+      - id: deployment
+        uses: actions/deploy-pages@v4
