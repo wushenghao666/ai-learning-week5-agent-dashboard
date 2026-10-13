@@ -1,103 +1,63 @@
-# 第五周：把学习 Agent 做成可视化 Web 应用
+# 第五周：Agent 可视化任务控制台
 
-本项目在第四周持久化学习 Agent 的基础上增加本地 Web 控制台。浏览器页面可以创建学习目标、查看任务依赖、逐步执行工具、观察完成率和工具调用时间线。服务端仍然使用 Python 标准库，数据保存到 `outputs/session.json`，关闭页面后再次打开可以恢复会话。
+在第四周的 Planner、Session、工具白名单和依赖执行器上增加 Web 界面。支持学习、作品集项目规划、面试准备和笔记整理。模型负责规划任务，本地工具输出摘要、清单、时间预算和复盘提醒；完成率统计工具执行进度。
 
-## 功能
+## 公网地址
 
-- 在网页输入学习目标，调用第四周 Planner 生成四个带依赖的任务
-- 通过任务卡片显示状态、工具、前置任务、尝试次数和结果
-- 点击执行下一步，只运行当前满足依赖的任务，并把事件写回会话文件
-- 查看完成率、工具成功率、可执行任务数量和事件数量
-- 显示工具调用时间线和复盘建议
-- 提供清空会话操作，便于重新演示
-- 不依赖第三方 Python 包，不联网调用模型；`--llm` 仍可由命令行显式启用第四周的模型规划回退逻辑
+- 前端：https://wushenghao666.github.io/ai-learning-week5-agent-dashboard/
+- 仓库：https://github.com/wushenghao666/ai-learning-week5-agent-dashboard
 
-## 快速开始
+当前前端已发布。后端尚未配置时，Pages 自动使用浏览器本地模拟模型，并显示明确警告。模拟会话保存到当前浏览器的 localStorage，刷新后可以恢复。这里只保存演示会话和随机会话编号，不保存 API Key。
+
+## 本地运行
 
 ```powershell
-cd 'C:\Users\wushe\Documents\ChatGPT\week 5\ai-learning-week5-agent-dashboard'
 python -m src.web
 ```
 
-打开 <http://127.0.0.1:8000>。也可以运行命令行测试：
+打开 http://127.0.0.1:8000 。本地 Python 后端通过 JSON 文件保存状态。每个浏览器发送随机会话编号，后端将各份会话分开保存，文件不会提交到 GitHub。服务端通过锁串行执行写操作，防止同时点击时重复写入。
 
 ```powershell
 python -m unittest discover -s tests -v
+node tests/test_demo.cjs
 ```
 
-## 页面操作流程
+11 项 Python 测试覆盖持久化、依赖、复盘、模拟警告恢复、会话隔离、空目标、非法编号、路径遍历和失败阻塞。Node 测试执行四类示例、刷新恢复、清空和失败依赖。Pages 工作流在发布前运行这些检查，发布后检查首页与四个静态资源的 HTTP 200。
 
-```text
-输入目标
-  ↓
-POST /api/init
-  ↓
-任务卡片 + 依赖关系 + 指标
-  ↓
-点击执行下一步
-  ↓
-POST /api/run，运行当前 ready task
-  ↓
-保存 outputs/session.json，刷新后恢复
-```
+## 三种运行状态
 
-后端接口只有三个写操作：`/api/init` 创建计划，`/api/run` 执行可运行任务，`/api/reset` 删除当前会话。`GET /api/session` 返回页面所需的完整状态，包括任务、事件、复盘指标和可执行任务编号。静态资源由同一个 `ThreadingHTTPServer` 提供。
+| 状态 | 条件 | 提示与结果 |
+| --- | --- | --- |
+| 浏览器模拟 | Pages 未配置后端地址 | 警告后端尚未连接，输出规则生成的预期结果 |
+| 服务端模拟 | 开启模型选项，后端没有 OPENAI_API_KEY | 警告 Key 未配置，使用本地规则生成任务 |
+| 真实模型规划 | 后端有 OPENAI_API_KEY，开启模型选项 | 请求 Responses API，校验工具和依赖后保存计划 |
 
-## 目录结构
+关闭模型选项时使用规则规划。配置了 Key 后发生网络或模型错误会显示失败，不会把错误包装成真实模型成功。
 
-```text
-ai-learning-week5-agent-dashboard/
-├─ src/
-│  ├─ agent.py       # 第四周的初始化、执行和复盘
-│  ├─ memory.py      # Session、Task、Event 持久化
-│  ├─ planner.py     # 目标拆解和依赖
-│  ├─ tools.py       # 本地工具和参数校验
-│  └─ web.py         # HTTP API 与静态文件服务
-├─ web/
-│  ├─ index.html     # 页面结构
-│  ├─ app.js         # 请求、渲染和交互
-│  └─ styles.css     # 响应式样式
-├─ tests/
-├─ outputs/
-├─ examples/
-├─ blog/
-├─ requirements.txt
-└─ README.md
-```
+## 免费托管方案：Pages + Render Free
 
-## 设计说明
+GitHub Pages 发布 web/，Render Free 运行 Python 后端。免费托管额度不包含 OpenAI 模型费用。
 
-页面没有复制一套新的 Agent 状态。每次 API 调用都读取或更新 `Session`，所以命令行和浏览器可以使用同一份 JSON。依赖判断继续由 `Session.ready_tasks()` 完成，前端只负责展示结果和发送操作。执行错误沿用第四周的两次重试与事件记录，前端能看到失败任务的错误文字。
+1. 登录 https://dashboard.render.com/ ，创建 Web Service。
+2. 使用公开仓库地址 https://github.com/wushenghao666/ai-learning-week5-agent-dashboard 。
+3. Runtime 选择 Python 3，Build Command 为 pip install -r requirements.txt 。
+4. Start Command 为 python -m src.web --host 0.0.0.0 --port $PORT 。
+5. Instance Type 明确选择 Free。也可以使用仓库 render.yaml 创建 Blueprint。
+6. 设置 AGENT_ALLOWED_ORIGIN 为 https://wushenghao666.github.io ，不包含仓库路径。
+7. 如果需要真实模型，在 Render 环境变量中自行设置 OPENAI_API_KEY，可设置 OPENAI_MODEL。Key 无需发到聊天，不应提交到代码。
+8. 后端成功部署后，访问 /api/health 检查 model_configured。
+9. 在 GitHub 仓库 Settings → Secrets and variables → Actions → Variables 增加 AGENT_API_BASE，填写完整 HTTPS 后端地址，不带末尾斜杠。
+10. 在 Actions 手动运行 Deploy web to GitHub Pages，前端将改为使用该后端。
 
-页面将任务状态用颜色和徽标区分：待执行任务显示灰色，已完成任务显示绿色，失败任务显示红色。时间线按最新事件排在前面，事件内容来自 `Event.output` 或 `Event.error`。刷新页面时先请求 `/api/session`，存在会话文件就直接恢复任务和指标。
+Render 免费服务闲置 15 分钟后休眠，下次访问可能需要约一分钟唤醒；文件在重启、休眠或重新部署后会丢失。该版本用于学习演示，长期会话需要外部持久化存储。浏览器必须能访问 Render，Pages 不会代替浏览器转发请求。
 
-## 后续方向
+模型调用默认限制为每个进程滚动 24 小时最多 20 次，可通过 AGENT_DAILY_MODEL_LIMIT 调整。计数会在进程重启后清空，不能用作硬性费用上限。正式公开提供长期服务前需要账户认证与持久化额度统计。
 
-当前版本适合单用户本地使用。下一步可以加入任务详情编辑、人工确认按钮、图形化依赖连线和真实模型规划的配置面板。数据格式、工具白名单和执行循环已经保留，后续功能可以围绕这些接口继续扩展。
+## 示例预期结果
 
-## 线上部署：GitHub Pages + Render
+- RAG，6 小时：学习清单，3 天，每天约 2 小时。
+- 作品集网站，8 小时：内容整理、页面原型、布局检查清单，4 天，每天约 2 小时。
+- 面试准备，4 小时：知识复习、题目练习、薄弱项复盘，2 天，每天约 2 小时。
+- 读书笔记：摘录、主题归纳、复盘清单，未提供时长时建议每天 1 小时。
 
-GitHub Pages 只发布 `web/` 静态文件，Python API 服务部署到 Render。项目提供了 `render.yaml` 和 `.github/workflows/pages.yml`。
-
-### 部署后端
-
-1. 在 Render 创建 Web Service，连接本仓库并使用 `render.yaml`。
-2. 在 Render 环境变量中设置 `OPENAI_API_KEY`，可选设置 `OPENAI_MODEL`。
-3. 将 `AGENT_ALLOWED_ORIGIN` 设置为 GitHub Pages 的完整地址，例如 `https://用户名.github.io`。
-4. 访问后端 `/api/health`，确认 `model_configured` 为 `true`。
-
-Key 只存在 Render 的环境变量中。不要把 Key 写入 `web/config.js`、前端代码、GitHub Secrets 以外的文件或请求 URL。
-
-### 部署前端
-
-1. 在仓库 Settings → Pages 中选择 GitHub Actions。
-2. 在仓库 Variables 中增加 `AGENT_API_BASE`，值为 Render 后端地址，例如 `https://ai-learning-week5-agent.onrender.com`。
-3. 推送到 `main`，工作流会把 `web/` 发布到 GitHub Pages，并生成指向后端的 `config.js`。
-
-页面的使用真实大模型规划开关会向 `/api/init` 发送 `use_llm: true`。后端读取自己的 `OPENAI_API_KEY` 调用 Responses API。没有 Key 或模型请求失败时，接口返回错误，页面不会静默改用规则规划。
-
-### 无 API Key 时的模拟模式
-
-打开网页中的使用真实大模型规划后，后端会先检查 `OPENAI_API_KEY`。没有配置时，页面使用本地规则规划作为模拟模型，并显示橙色提示，说明没有发生真实模型调用。页面中的四个示例可以分别演示学习计划、项目计划、面试准备和读书笔记整理。每个示例都会返回目标摘要、学习清单、时间预算和复盘提醒。
-
-这套模拟模式用于演示页面和 Agent 执行流程，不产生 OpenAI API 费用。配置 Key 后，同一个开关会改为调用真实模型，模型结果仍然经过工具白名单和依赖校验。
+模拟模式四次执行依次达到 25%、50%、75%、100%。真实模型可以返回 2 到 5 个任务，数量和文字随响应变化。规划工具会生成材料，实际网页制作与面试练习需要使用者继续完成。

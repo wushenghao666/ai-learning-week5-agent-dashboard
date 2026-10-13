@@ -7,8 +7,6 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: python -m src.web --host 0.0.0.0 --port $PORT
     envVars:
-      - key: OPENAI_API_KEY
-        sync: false
       - key: OPENAI_MODEL
         value: gpt-5-mini
       - key: AGENT_ALLOWED_ORIGIN
