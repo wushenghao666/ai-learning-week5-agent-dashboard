@@ -76,3 +76,16 @@ Render 免费服务闲置 15 分钟后休眠，下次访问可能需要约一分
 - 刷新页面恢复完整记录。旧会话缺少规划记录时显示提示，重新创建后可以查看。
 
 测试已扩展为 14 项 Python 测试；新增规划输出记录、失败校验记录、耗时恢复、密钥与内部推理排除检查。
+# 并行科技接口配置
+
+后端支持 OpenAI Responses 和兼容 Chat Completions 两种接口。在 Render Environment 中配置：
+
+```text
+OPENAI_API_STYLE=chat_completions
+OPENAI_BASE_URL=https://llmapi.paratera.com/v1
+OPENAI_MODEL=GLM-4-Flash
+OPENAI_API_KEY=填写你自己的密钥
+```
+
+模型 ID 应从当前账户模型列表确认；上述模型仅为配置示例。保留环境变量名称 OPENAI_API_KEY 以兼容已有部署，该变量也可存放并行科技密钥。密钥仅在后端使用，不写入 GitHub Pages。默认接口仍为 OpenAI Responses。兼容接口保留原始文本输出、用量和工具执行记录。
+

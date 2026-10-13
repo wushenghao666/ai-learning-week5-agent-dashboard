@@ -10,6 +10,7 @@ import time
 from datetime import datetime, timezone
 import urllib.error
 import urllib.request
+from urllib.parse import urlparse
 from .planner import PlannedTask
 
 class LLMError(RuntimeError):
@@ -23,7 +24,15 @@ Support learning, portfolio project planning, interview preparation and note org
 summarize and review_prompt argument must be a nonempty string.
 checklist argument must be a nonempty array of strings specific to the goal.
 time_budget argument must be an object with integer hours from 1 to 168 and goal text.
-These tools create planning material; do not claim to build websites or complete real-world work.'''
+These tools create planning material; do not claim to build websites or complete real-world work.
+Write all titles, actions, and argument text in Chinese.
+Every task MUST include depends_on, including an empty array for the first task.
+The time_budget argument key is exactly goal, never goal_text.
+Example of the required shape (adapt the contents to the user's goal):
+{"tasks":[{"id":"t1","title":"目标摘要","action":"整理目标","tool":"summarize","argument":"用户的目标","depends_on":[]},
+{"id":"t2","title":"行动清单","action":"列出步骤","tool":"checklist","argument":["阅读资料","练习与复盘"],"depends_on":["t1"]},
+{"id":"t3","title":"时间安排","action":"分配时间","tool":"time_budget","argument":{"hours":4,"goal":"用户的目标"},"depends_on":["t2"]},
+{"id":"t4","title":"复盘提醒","action":"整理复盘问题","tool":"review_prompt","argument":"用户的目标","depends_on":["t3"]}]}'''
 
 def _output_text(payload: dict) -> str:
     if isinstance(payload.get('output_text'), str):
@@ -38,6 +47,18 @@ def _output_text(payload: dict) -> str:
     if not chunks:
         raise LLMError('Responses API 没有返回文本')
     return ''.join(chunks)
+
+def model_mode() -> str:
+    return 'chat_compatible' if os.getenv('OPENAI_API_STYLE', 'responses') == 'chat_completions' else 'openai'
+
+def _chat_output_text(payload: dict) -> str:
+    try:
+        content = payload['choices'][0]['message']['content']
+    except (KeyError, IndexError, TypeError) as exc:
+        raise LLMError('Chat Completions 接口没有返回文本') from exc
+    if not isinstance(content, str) or not content.strip():
+        raise LLMError('Chat Completions 接口没有返回文本')
+    return content
 
 def trace_event(trace: list[dict], stage: str, title: str, **data) -> None:
     trace.append({'timestamp': datetime.now(timezone.utc).isoformat(timespec='milliseconds'),
@@ -59,8 +80,15 @@ def plan_with_llm(goal: str, timeout: int = 30, trace: list[dict] | None = None)
     if not key:
         raise LLMError('未设置 OPENAI_API_KEY')
     model = os.getenv('OPENAI_MODEL', 'gpt-5-mini')
+    style = os.getenv('OPENAI_API_STYLE', 'responses')
+    if style not in ('responses', 'chat_completions'):
+        raise LLMError('OPENAI_API_STYLE 必须为 responses 或 chat_completions')
+    base_url = os.getenv('OPENAI_BASE_URL', 'https://api.openai.com/v1').rstrip('/')
+    parsed = urlparse(base_url)
+    if parsed.scheme != 'https' or not parsed.netloc or parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise LLMError('OPENAI_BASE_URL 必须为不含凭证、查询参数和片段的 HTTPS 地址')
     started = time.perf_counter()
-    trace_event(trace, 'request', '发送模型规划请求', mode='openai', model=model,
+    trace_event(trace, 'request', '发送模型规划请求', mode=model_mode(), model=model,
                 input=goal, instructions=SYSTEM_PROMPT)
     body = {
         'model': model,
@@ -69,8 +97,12 @@ def plan_with_llm(goal: str, timeout: int = 30, trace: list[dict] | None = None)
         'store': False,
         'max_output_tokens': 3000,
     }
+    if style == 'chat_completions':
+        body = {'model': model, 'messages': [
+            {'role': 'system', 'content': SYSTEM_PROMPT},
+            {'role': 'user', 'content': goal}], 'stream': False, 'max_tokens': 3000}
     request = urllib.request.Request(
-        'https://api.openai.com/v1/responses',
+        base_url + ('/chat/completions' if style == 'chat_completions' else '/responses'),
         data=json.dumps(body).encode('utf-8'),
         headers={'Authorization': f'Bearer {key}', 'Content-Type': 'application/json'},
         method='POST',
@@ -83,7 +115,7 @@ def plan_with_llm(goal: str, timeout: int = 30, trace: list[dict] | None = None)
                     duration_ms=round((time.perf_counter() - started) * 1000, 2))
         raise LLMError(f'模型请求失败：{exc}') from exc
     try:
-        raw = _output_text(payload).strip()
+        raw = (_chat_output_text(payload) if style == 'chat_completions' else _output_text(payload)).strip()
         trace_event(trace, 'output', '收到模型输出', output=raw, model=model,
                     duration_ms=round((time.perf_counter() - started) * 1000, 2),
                     usage=payload.get('usage', {}))
@@ -111,7 +143,7 @@ def plan_with_llm(goal: str, timeout: int = 30, trace: list[dict] | None = None)
                 raise ValueError('文本工具参数必须为字符串')
             if task.tool == 'checklist' and not (isinstance(task.argument, list) and task.argument and all(isinstance(x, str) and x.strip() for x in task.argument)):
                 raise ValueError('清单工具参数必须为文字数组')
-            if task.tool == 'time_budget' and not (isinstance(task.argument, dict) and type(task.argument.get('hours')) is int and 1 <= task.argument['hours'] <= 168):
+            if task.tool == 'time_budget' and not (isinstance(task.argument, dict) and type(task.argument.get('hours')) is int and 1 <= task.argument['hours'] <= 168 and isinstance(task.argument.get('goal'), str) and task.argument['goal'].strip()):
                 raise ValueError('时间预算参数无效')
             earlier.add(task.id)
         trace_event(trace, 'validated', '模型计划校验通过', task_count=len(tasks),

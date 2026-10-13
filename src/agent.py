@@ -7,7 +7,7 @@ from dataclasses import asdict
 from pathlib import Path
 from .memory import Event, Session
 from .planner import Planner
-from .llm import LLMError, plan_with_llm, local_planning_trace
+from .llm import LLMError, plan_with_llm, local_planning_trace, model_mode
 from .tools import TOOLS, ToolError
 
 MAX_RETRIES = 2
@@ -18,7 +18,7 @@ def init_session(goal: str, path: str, use_llm: bool = False, allow_fallback: bo
     if use_llm:
         try:
             planned = plan_with_llm(goal, trace=trace)
-            print('规划器：OpenAI Responses API')
+            print('规划器：' + ('Chat Completions 兼容接口' if model_mode() == 'chat_compatible' else 'OpenAI Responses API'))
         except LLMError as exc:
             if not allow_fallback:
                 raise

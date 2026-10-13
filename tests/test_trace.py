@@ -9,6 +9,27 @@ from src.llm import plan_with_llm, LLMError
 from src.planner import Planner
 
 class TraceTests(unittest.TestCase):
+    def test_chat_compatible_request_and_response(self):
+        raw = json.dumps({'tasks':[t.to_dict() for t in Planner().plan('准备面试 4 小时')]})
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self,*args): pass
+            def read(self): return json.dumps({'choices':[{'message':{'content':raw,'reasoning_content':'private reasoning'}}],'usage':{'total_tokens':42}}).encode()
+        trace=[]
+        env={'OPENAI_API_KEY':'test-secret-not-real','OPENAI_API_STYLE':'chat_completions','OPENAI_BASE_URL':'https://llmapi.paratera.com/v1/','OPENAI_MODEL':'GLM-4-Flash'}
+        with patch.dict('os.environ',env), patch('urllib.request.urlopen',return_value=Response()) as call:
+            self.assertEqual(len(plan_with_llm('准备面试 4 小时',trace=trace)),4)
+        request=call.call_args.args[0]
+        self.assertEqual(request.full_url,'https://llmapi.paratera.com/v1/chat/completions')
+        body=json.loads(request.data)
+        self.assertEqual(body['model'],'GLM-4-Flash')
+        self.assertEqual(body['messages'][1]['content'],'准备面试 4 小时')
+        self.assertNotIn('instructions',body)
+        self.assertEqual(trace[0]['mode'],'chat_compatible')
+        self.assertEqual(trace[1]['usage']['total_tokens'],42)
+        self.assertNotIn('test-secret-not-real',json.dumps(trace))
+        self.assertNotIn('private reasoning',json.dumps(trace))
+
     def test_trace_and_call_timing_persist(self):
         path = Path('outputs/test-trace.json')
         try:

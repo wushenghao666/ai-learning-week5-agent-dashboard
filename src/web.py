@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 from .agent import init_session, review, run_session
-from .llm import LLMError, simulation_plan, local_planning_trace
+from .llm import LLMError, simulation_plan, local_planning_trace, model_mode
 from .memory import Session
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -115,7 +115,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                         return self._json({'error': '今日模型调用额度已用完，请使用规则规划'}, 429)
                     MODEL_CALLS.append(now)
                 session = init_session(goal, str(session_path), use_llm, allow_fallback=False, trace=planning_trace)
-                session.model_mode = 'openai' if use_llm else 'rules'
+                session.model_mode = model_mode() if use_llm else 'rules'
                 session.save(session_path)
                 return self._json(session_payload(session))
             if path == '/api/run':

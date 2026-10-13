@@ -4,7 +4,7 @@ const state = { session: null, busy: false };
 let token = localStorage.getItem('week5-session-token');
 if (!token) { token = crypto.randomUUID(); localStorage.setItem('week5-session-token', token); }
 const statusText = { pending: '待执行', running: '执行中', done: '已完成', failed: '失败' };
-const modeText = {rules:'规则规划',simulation:'模拟模型',openai:'真实模型'};
+const modeText = {rules:'规则规划',simulation:'模拟模型',openai:'真实模型',chat_compatible:'真实模型 · 兼容接口'};
 function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char])); }
 function format(value) { return typeof value === 'string' ? value : JSON.stringify(value, null, 2); }
 function code(value) { return `<pre class="trace-code">${escapeHtml(format(value))}</pre>`; }
@@ -78,7 +78,7 @@ async function operation(text, action) {
   catch(error) { const message = error.message === 'Failed to fetch' ? '无法连接后端，操作结果尚未确认；请刷新会话后再继续' : error.message; showNotice(message,true); $('#operation').textContent = `操作失败：${message}`; if (error.planningTrace?.length) { $('#empty').classList.add('hidden'); $('#dashboard').classList.remove('hidden'); planning(error.planningTrace); $('#operation').textContent = '本次规划失败，详情见规划记录；原有会话未被替换'; } }
   finally { busy(''); }
 }
-$('#createBtn').onclick = () => { const goal=$('#goal').value.trim(); if (!goal) return showNotice('请先输入任务目标',true); return operation('接收目标 → 请求规划 → 等待输出与校验…',async()=>{render(await request('/api/init',{method:'POST',body:JSON.stringify({goal,use_llm:$('#llmMode').checked})})); showNotice(state.session.model_mode==='simulation'?'模拟计划已创建，请查看警告':state.session.model_mode==='openai'?'真实模型计划已创建':'规则计划已创建');}); };
+$('#createBtn').onclick = () => { const goal=$('#goal').value.trim(); if (!goal) return showNotice('请先输入任务目标',true); return operation('接收目标 → 请求规划 → 等待输出与校验…',async()=>{render(await request('/api/init',{method:'POST',body:JSON.stringify({goal,use_llm:$('#llmMode').checked})})); showNotice(state.session.model_mode==='simulation'?'模拟计划已创建，请查看警告':['openai','chat_compatible'].includes(state.session.model_mode)?'真实模型计划已创建':'规则计划已创建');}); };
 $('#runBtn').onclick = () => operation(`检查依赖 → 调用 ${state.session?.ready_tasks?.join('、') || ''} 的工具 → 保存结果…`,async()=>{const result=await request('/api/run',{method:'POST',body:'{}'});render(result);showNotice(result.outputs.length?`完成 ${result.outputs.length} 个任务`:'当前没有可执行任务');});
 $('#resetBtn').onclick = () => operation('清空当前会话…',async()=>{render(await request('/api/reset',{method:'POST',body:'{}'}));showNotice('会话已清空');});
 request('/api/session').then(render).catch(error=>showNotice(error.message,true));
