@@ -75,7 +75,7 @@ async function operation(text, action) {
   if (state.busy) return;
   busy(text); showNotice(text);
   try { await action(); }
-  catch(error) { showNotice(error.message,true); if (error.planningTrace?.length) { $('#empty').classList.add('hidden'); $('#dashboard').classList.remove('hidden'); planning(error.planningTrace); $('#operation').textContent = '本次规划失败，详情见规划记录；原有会话未被替换'; } }
+  catch(error) { const message = error.message === 'Failed to fetch' ? '无法连接后端，操作结果尚未确认；请刷新会话后再继续' : error.message; showNotice(message,true); $('#operation').textContent = `操作失败：${message}`; if (error.planningTrace?.length) { $('#empty').classList.add('hidden'); $('#dashboard').classList.remove('hidden'); planning(error.planningTrace); $('#operation').textContent = '本次规划失败，详情见规划记录；原有会话未被替换'; } }
   finally { busy(''); }
 }
 $('#createBtn').onclick = () => { const goal=$('#goal').value.trim(); if (!goal) return showNotice('请先输入任务目标',true); return operation('接收目标 → 请求规划 → 等待输出与校验…',async()=>{render(await request('/api/init',{method:'POST',body:JSON.stringify({goal,use_llm:$('#llmMode').checked})})); showNotice(state.session.model_mode==='simulation'?'模拟计划已创建，请查看警告':state.session.model_mode==='openai'?'真实模型计划已创建':'规则计划已创建');}); };
