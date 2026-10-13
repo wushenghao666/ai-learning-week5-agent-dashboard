@@ -8,7 +8,7 @@
 - 后端：https://ai-learning-week5-agent-dashboard.onrender.com
 - 仓库：https://github.com/wushenghao666/ai-learning-week5-agent-dashboard
 
-2026-10-13 前端与 Render 免费后端已上线并连接。后端尚未配置 OpenAI API Key，开启模型选项时显示服务端模拟警告。
+2026-10-13 前端与 Render 免费后端已上线并连接。后端已配置并行科技 Chat Completions 接口及 GLM-4-Flash，线上真实模型规划、四个工具执行及刷新恢复测试通过。
 
 后端尚未配置时，Pages 自动使用浏览器本地模拟模型，并显示明确警告。模拟会话保存到当前浏览器的 localStorage，刷新后可以恢复。这里只保存演示会话和随机会话编号，不保存 API Key。
 
@@ -88,4 +88,3 @@ OPENAI_API_KEY=填写你自己的密钥
 ```
 
 模型 ID 应从当前账户模型列表确认；上述模型仅为配置示例。保留环境变量名称 OPENAI_API_KEY 以兼容已有部署，该变量也可存放并行科技密钥。密钥仅在后端使用，不写入 GitHub Pages。默认接口仍为 OpenAI Responses。兼容接口保留原始文本输出、用量和工具执行记录。
-
