@@ -27,6 +27,11 @@
       const hour = goal.match(/(\d+)\s*(小时|h|hour)/i);
       const specs = [['明确任务目标', '提取主题和产出', 'summarize', goal], ['建立执行清单', '整理可执行步骤', 'checklist', checklist(goal)], ['安排时间预算', '计算每天投入', 'time_budget', hour ? {hours: Number(hour[1])} : goal], ['生成复盘提醒', '记录有效做法和改进点', 'review_prompt', goal]];
       session = {goal, created_at: new Date().toISOString(), model_mode: 'simulation', model_notice: warning, events: [], tasks: specs.map((s,i) => ({id:`t${i+1}`,title:s[0],action:s[1],tool:s[2],argument:s[3],depends_on:i?[`t${i}`]:[],status:'pending',attempts:0,result:null,error:null}))};
+      session.planning_trace = [
+        {timestamp:new Date().toISOString(),stage:'request',title:'接收目标',mode:'simulation',input:goal},
+        {timestamp:new Date().toISOString(),stage:'output',title:'浏览器模拟模型输出',mode:'simulation',output:JSON.stringify({tasks:session.tasks},null,2),note:'本地规则生成，无真实模型请求'},
+        {timestamp:new Date().toISOString(),stage:'validated',title:'计划结构已建立',task_count:session.tasks.length,output:'工具来自注册表，任务按前置依赖执行'}
+      ];
       save(session); return payload(session);
     }
     if (path === '/api/run') {
@@ -34,6 +39,7 @@
       const ready = payload(session).ready_tasks;
       const outputs = [];
       for (const task of session.tasks.filter(t => ready.includes(t.id))) {
+        const started = Date.now();
         const hours = task.argument?.hours;
         const failed = task.tool === 'time_budget' && hours !== undefined && (hours < 1 || hours > 168);
         let result;
@@ -42,7 +48,7 @@
         if (task.tool === 'time_budget') { const days = Math.min(7,Math.max(1,Math.floor(hours/2)||1)); result = hours === undefined ? '目标未提供小时数，建议先安排每天 1 小时' : `总计 ${hours} 小时，建议分为 ${days} 天，每天约 ${(hours/days).toFixed(1)} 小时`; }
         if (task.tool === 'review_prompt') result = `复盘问题：${session.goal}；完成后记录一个有效做法和一个待改进点。`;
         task.status = failed ? 'failed' : 'done'; task.attempts = failed ? 2 : 1; task.result = failed ? null : result; task.error = failed ? '小时数需要在 1 到 168 之间' : null;
-        for (let attempt=0; attempt<task.attempts; attempt++) session.events.push({timestamp:new Date().toISOString(),kind:'tool_call',task_id:task.id,tool:task.tool,status:failed?'error':'ok',input:task.argument,output:task.result,error:task.error});
+        for (let attempt=0; attempt<task.attempts; attempt++) session.events.push({timestamp:new Date().toISOString(),kind:'tool_call',task_id:task.id,tool:task.tool,status:failed?'error':'ok',input:task.argument,output:task.result,error:task.error,duration_ms:Date.now()-started,attempt:attempt+1});
         outputs.push({task:task.id,status:task.status,result:task.result});
       }
       save(session); return {...payload(session), outputs};

@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 from .agent import init_session, review, run_session
-from .llm import LLMError, simulation_plan
+from .llm import LLMError, simulation_plan, local_planning_trace
 from .memory import Session
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -95,6 +95,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def _post_locked(self) -> None:
         path = urlparse(self.path).path
+        planning_trace = []
         try:
             session_path = self._session_path()
             if path == '/api/init':
@@ -104,6 +105,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     session = Session.create(goal, [task.to_dict() for task in simulation_plan(goal)])
                     session.model_mode = 'simulation'
                     session.model_notice = '未配置 OPENAI_API_KEY，当前使用本地模拟模型。结果用于演示流程，不会产生真实模型调用费用。'
+                    session.planning_trace = local_planning_trace(goal, [t.__dict__ for t in session.tasks], 'simulation')
                     session.save(session_path)
                     return self._json(session_payload(session))
                 if use_llm:
@@ -112,7 +114,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     if len(MODEL_CALLS) >= int(os.getenv('AGENT_DAILY_MODEL_LIMIT', '20')):
                         return self._json({'error': '今日模型调用额度已用完，请使用规则规划'}, 429)
                     MODEL_CALLS.append(now)
-                session = init_session(goal, str(session_path), use_llm, allow_fallback=False)
+                session = init_session(goal, str(session_path), use_llm, allow_fallback=False, trace=planning_trace)
                 session.model_mode = 'openai' if use_llm else 'rules'
                 session.save(session_path)
                 return self._json(session_payload(session))
@@ -124,7 +126,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 session_path.unlink(missing_ok=True); return self._json({'session': None})
             self._json({'error': '接口不存在'}, 404)
         except LLMError as exc:
-            self._json({'error': str(exc)}, 503)
+            self._json({'error': str(exc), 'planning_trace': planning_trace}, 503)
         except (ValueError, KeyError, json.JSONDecodeError) as exc:
             self._json({'error': str(exc)}, 400)
 

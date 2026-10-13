@@ -29,6 +29,8 @@ class Event:
     input: Any
     output: Any = None
     error: str | None = None
+    duration_ms: float | None = None
+    attempt: int | None = None
 
 @dataclass
 class Session:
@@ -39,6 +41,7 @@ class Session:
     events: list[Event] = field(default_factory=list)
     model_mode: str = 'rules'
     model_notice: str | None = None
+    planning_trace: list[dict] = field(default_factory=list)
 
     @classmethod
     def create(cls, goal: str, planned_tasks: list[dict]) -> 'Session':

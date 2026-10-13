@@ -2,26 +2,29 @@
 from __future__ import annotations
 import argparse
 import json
+import time
 from dataclasses import asdict
 from pathlib import Path
 from .memory import Event, Session
 from .planner import Planner
-from .llm import LLMError, plan_with_llm
+from .llm import LLMError, plan_with_llm, local_planning_trace
 from .tools import TOOLS, ToolError
 
 MAX_RETRIES = 2
 
-def init_session(goal: str, path: str, use_llm: bool = False, allow_fallback: bool = True) -> Session:
+def init_session(goal: str, path: str, use_llm: bool = False, allow_fallback: bool = True, trace: list[dict] | None = None) -> Session:
+    trace = trace if trace is not None else []
     planned = Planner().plan(goal)
     if use_llm:
         try:
-            planned = plan_with_llm(goal)
+            planned = plan_with_llm(goal, trace=trace)
             print('规划器：OpenAI Responses API')
         except LLMError as exc:
             if not allow_fallback:
                 raise
             print(f'模型规划不可用，回退规则规划：{exc}')
     session = Session.create(goal, [task.to_dict() for task in planned])
+    session.planning_trace = trace or local_planning_trace(goal, [task.to_dict() for task in planned], 'rules')
     session.save(path)
     return session
 
@@ -31,15 +34,18 @@ def run_session(session: Session) -> list[dict]:
         task.status = 'running'
         while task.attempts < MAX_RETRIES:
             task.attempts += 1
+            started = time.perf_counter()
             try:
                 result = TOOLS[task.tool](task.argument)
                 task.result, task.status, task.error = result, 'done', None
-                session.events.append(Event(_timestamp(), 'tool_call', task.id, task.tool, 'ok', task.argument, result))
+                session.events.append(Event(_timestamp(), 'tool_call', task.id, task.tool, 'ok', task.argument, result,
+                                            duration_ms=round((time.perf_counter() - started) * 1000, 3), attempt=task.attempts))
                 outputs.append({'task': task.id, 'status': 'done', 'result': result})
                 break
             except (ToolError, KeyError, TypeError) as exc:
                 task.error = str(exc)
-                session.events.append(Event(_timestamp(), 'tool_call', task.id, task.tool, 'error', task.argument, error=str(exc)))
+                session.events.append(Event(_timestamp(), 'tool_call', task.id, task.tool, 'error', task.argument, error=str(exc),
+                                            duration_ms=round((time.perf_counter() - started) * 1000, 3), attempt=task.attempts))
                 if task.attempts >= MAX_RETRIES:
                     task.status = 'failed'
                     outputs.append({'task': task.id, 'status': 'failed', 'error': str(exc)})

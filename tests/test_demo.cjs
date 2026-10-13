@@ -9,9 +9,9 @@ const call=context.window.demoRequest;
 (async()=>{
   for (const [goal,time] of [['本周学习 RAG，安排 6 小时','3 天'],['设计作品集网站，安排 8 小时','4 天'],['准备机器学习面试，安排 4 小时','2 天'],['整理读书笔记','每天 1 小时']]) {
     let session=await call('/api/init',{body:JSON.stringify({goal,use_llm:true})});
-    assert.equal(session.model_mode,'simulation'); assert.match(session.model_notice,/未调用真实大模型/);
+    assert.equal(session.model_mode,'simulation'); assert.equal(session.planning_trace[1].stage,'output'); assert.equal(JSON.parse(session.planning_trace[1].output).tasks.length,4); assert.match(session.model_notice,/未调用真实大模型/);
     for (const rate of [.25,.5,.75,1]) { session=await call('/api/run'); assert.equal(session.review.completion_rate,rate); }
-    assert.equal(session.events.length,4); assert.equal(session.review.tool_success_rate,1); assert.ok(session.tasks[2].result.includes(time));
+    assert.equal(session.events.length,4); assert.equal(session.events[0].attempt,1); assert.equal(typeof session.events[0].duration_ms,'number'); assert.equal(session.review.tool_success_rate,1); assert.ok(session.tasks[2].result.includes(time));
     const restored=await call('/api/session'); assert.equal(restored.review.completion_rate,1);
     await call('/api/reset'); assert.equal((await call('/api/session')).session,null);
   }

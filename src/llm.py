@@ -6,6 +6,8 @@ library so the offline rule planner remains the default path.
 from __future__ import annotations
 import json
 import os
+import time
+from datetime import datetime, timezone
 import urllib.error
 import urllib.request
 from .planner import PlannedTask
@@ -28,6 +30,8 @@ def _output_text(payload: dict) -> str:
         return payload['output_text']
     chunks = []
     for item in payload.get('output', []):
+        if item.get('type', 'message') != 'message':
+            continue
         for content in item.get('content', []):
             if isinstance(content, dict) and isinstance(content.get('text'), str):
                 chunks.append(content['text'])
@@ -35,11 +39,29 @@ def _output_text(payload: dict) -> str:
         raise LLMError('Responses API 没有返回文本')
     return ''.join(chunks)
 
-def plan_with_llm(goal: str, timeout: int = 30) -> list[PlannedTask]:
+def trace_event(trace: list[dict], stage: str, title: str, **data) -> None:
+    trace.append({'timestamp': datetime.now(timezone.utc).isoformat(timespec='milliseconds'),
+                  'stage': stage, 'title': title, **data})
+
+def local_planning_trace(goal: str, planned: list[dict], mode: str) -> list[dict]:
+    trace = []
+    trace_event(trace, 'request', '接收目标', mode=mode, input=goal)
+    trace_event(trace, 'output', '模拟模型输出' if mode == 'simulation' else '规则规划输出',
+                mode=mode, output=json.dumps({'tasks': planned}, ensure_ascii=False, indent=2),
+                duration_ms=0, note='本地规则生成，无真实模型请求；耗时未单独计量')
+    trace_event(trace, 'validated', '计划结构已建立', task_count=len(planned),
+                output='工具来自注册表，任务按前置依赖执行')
+    return trace
+
+def plan_with_llm(goal: str, timeout: int = 30, trace: list[dict] | None = None) -> list[PlannedTask]:
+    trace = trace if trace is not None else []
     key = os.getenv('OPENAI_API_KEY')
     if not key:
         raise LLMError('未设置 OPENAI_API_KEY')
     model = os.getenv('OPENAI_MODEL', 'gpt-5-mini')
+    started = time.perf_counter()
+    trace_event(trace, 'request', '发送模型规划请求', mode='openai', model=model,
+                input=goal, instructions=SYSTEM_PROMPT)
     body = {
         'model': model,
         'instructions': SYSTEM_PROMPT,
@@ -57,9 +79,14 @@ def plan_with_llm(goal: str, timeout: int = 30) -> list[PlannedTask]:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             payload = json.loads(response.read().decode('utf-8'))
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError) as exc:
+        trace_event(trace, 'error', '模型请求失败', error=str(exc),
+                    duration_ms=round((time.perf_counter() - started) * 1000, 2))
         raise LLMError(f'模型请求失败：{exc}') from exc
     try:
         raw = _output_text(payload).strip()
+        trace_event(trace, 'output', '收到模型输出', output=raw, model=model,
+                    duration_ms=round((time.perf_counter() - started) * 1000, 2),
+                    usage=payload.get('usage', {}))
         if raw.startswith('```'):
             raw = raw.strip('`').replace('json\n', '', 1).strip()
         items = json.loads(raw)['tasks']
@@ -87,8 +114,11 @@ def plan_with_llm(goal: str, timeout: int = 30) -> list[PlannedTask]:
             if task.tool == 'time_budget' and not (isinstance(task.argument, dict) and type(task.argument.get('hours')) is int and 1 <= task.argument['hours'] <= 168):
                 raise ValueError('时间预算参数无效')
             earlier.add(task.id)
+        trace_event(trace, 'validated', '模型计划校验通过', task_count=len(tasks),
+                    output='任务编号、工具白名单、参数类型和依赖顺序校验通过')
         return tasks
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        trace_event(trace, 'error', '计划校验失败', error=str(exc))
         raise LLMError(f'模型返回格式无效：{exc}') from exc
 
 def simulation_plan(goal: str) -> list[PlannedTask]:

@@ -19,12 +19,16 @@ for goal,time_text in [('本周学习 RAG，安排 6 小时','3 天'),('设计�
         assert status==200,session
         assert session['model_mode']=='simulation',session['model_mode']
         assert 'OPENAI_API_KEY' in session['model_notice']
+        assert session['planning_trace'][1]['stage']=='output'
+        assert len(json.loads(session['planning_trace'][1]['output'])['tasks'])==4
         for completion in (.25,.5,.75,1):
             status,session=call('/api/run',token,{})
             assert status==200 and session['review']['completion_rate']==completion
         assert time_text in session['tasks'][2]['result']
         assert session['review']['tool_success_rate']==1
         assert len(session['events'])==4
+        assert session['events'][0]['attempt']==1
+        assert session['events'][0]['duration_ms']>=0
         assert call('/api/session',token)[1]['model_notice']==session['model_notice']
         assert call('/api/session',str(uuid.uuid4()))[1]['session'] is None
         assert call('/api/session',token,method='OPTIONS')[0]==204
