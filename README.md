@@ -5,9 +5,12 @@
 ## 公网地址
 
 - 前端：https://wushenghao666.github.io/ai-learning-week5-agent-dashboard/
+- 后端：https://ai-learning-week5-agent-dashboard.onrender.com
 - 仓库：https://github.com/wushenghao666/ai-learning-week5-agent-dashboard
 
-当前前端已发布。后端尚未配置时，Pages 自动使用浏览器本地模拟模型，并显示明确警告。模拟会话保存到当前浏览器的 localStorage，刷新后可以恢复。这里只保存演示会话和随机会话编号，不保存 API Key。
+2026-10-13 前端与 Render 免费后端已上线并连接。后端尚未配置 OpenAI API Key，开启模型选项时显示服务端模拟警告。
+
+后端尚未配置时，Pages 自动使用浏览器本地模拟模型，并显示明确警告。模拟会话保存到当前浏览器的 localStorage，刷新后可以恢复。这里只保存演示会话和随机会话编号，不保存 API Key。
 
 ## 本地运行
 
