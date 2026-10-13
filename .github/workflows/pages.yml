@@ -15,6 +15,11 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      - name: Test backend and simulation
+        run: |
+          python3 -m unittest discover -s tests -v
+          node --check web/app.js
+          node tests/test_demo.cjs
       - name: Set backend URL
         env:
           AGENT_API_BASE: ${{ vars.AGENT_API_BASE }}
@@ -25,3 +30,17 @@ jobs:
           path: web
       - id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: Check public assets
+        env:
+          SITE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          python3 - <<'PY'
+          import os, urllib.request
+          base=os.environ['SITE_URL']
+          for filename in ['', 'styles.css', 'app.js', 'demo.js', 'config.js']:
+              with urllib.request.urlopen(base+filename, timeout=30) as response:
+                  assert response.status == 200
+                  assert len(response.read()) > 0
+                  print('HTTP 200', filename or 'index.html')
+          PY
